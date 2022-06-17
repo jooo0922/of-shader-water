@@ -87,11 +87,18 @@ void ofApp::setup(){
     planeMesh.load("plane.ply"); // planeMesh 메쉬로 사용할 모델링 파일 로드
     calcTangents(planeMesh); // plane 메쉬의 버텍스들을 이용해서 각 버텍스의 탄젠트 벡터를 구한 뒤 버텍스 컬러데이터 자리에 저장하는 함수 실행
     
+    shieldMesh.load("shield.ply"); // shieldMesh 메쉬로 사용할 모델링 파일 로드
+    calcTangents(shieldMesh); // shield 메쉬에 탄젠트 벡터를 구한 뒤 버텍스 컬러 자리에 저장하는 함수 실행
+
     waterShader.load("water.vert", "water.frag"); // planeMesh 에 노말맵을 활용한 물셰이더를 적용하기 위한 셰이더 파일 로드
+    blinnPhong.load("mesh.vert", "blinn-phong.frag"); // shieldMesh 에 (노말맵)텍스쳐를 활용한 Blinn-phong 반사모델을 적용하기 위한 셰이더 파일 로드
     
     waterNrm.load("water_nrm.png"); // planeMesh 의 조명계산에서 노말맵으로 사용할 텍스쳐 로드
     waterNrm.getTexture().setTextureWrap(GL_REPEAT, GL_REPEAT); // 프래그먼트 셰이더에서 노말맵 텍스쳐를 타일링하여 샘플링할 것이므로, 노말맵의 랩 모드를 반복으로 지정함.
     
+    diffuseTex.load("shield_diffuse.png"); // shieldMesh 의 조명계산에서 디퓨즈 라이팅 계산에 사용할 텍스쳐 로드
+    specTex.load("shield_spec.png"); // shieldMesh 의 조명계산에서 스펙큘러 라이팅 계산에 사용할 텍스쳐 로드
+    nrmTex.load("shield_normal.png"); // shieldMesh 의 조명계산에서 노말맵으로 사용할 텍스쳐 로드
 }
 
 //--------------------------------------------------------------
@@ -153,6 +160,37 @@ void ofApp::drawWater(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& vi
     // shd(waterShader) 사용 중단
 }
 
+void ofApp::drawShield(DirectionalLight& dirLight, glm::mat4& proj, glm::mat4& view) {
+    using namespace glm;
+    
+    mat4 model = translate(vec3(0.0, 0.75, 0.0f)); // shieldMesh 의 모델행렬 계산 (이동행렬만 적용)
+    mat4 mvp = proj * view * model; // 최적화를 위해 c++ 단에서 투영 * 뷰 * 모델행렬을 한꺼번에 곱해서 버텍스 셰이더에 전송함.
+    mat3 normalMatrix = mat3(transpose(inverse(model))); // 노말행렬은 '모델행렬의 상단 3*3 역행렬의 전치행렬' 로 계산함.
+    
+    ofShader& shd = blinnPhong; // 참조자 shd 는 ofShader 타입의 멤버변수 blinnPhong 셰이더 객체를 참조하도록 함.
+    
+    // shd(blinnPhong 를 참조) 를 바인딩하여 사용 시작
+    shd.begin();
+    
+    shd.setUniformMatrix4f("mvp", mvp); // 위에서 한꺼번에 합쳐준 mvp 행렬을 버텍스 셰이더 유니폼 변수로 전송
+    shd.setUniformMatrix4f("model", model); // 버텍스 좌표를 월드좌표로 변환하기 위해 모델행렬만 따로 버텍스 셰이더 유니폼 변수로 전송
+    shd.setUniformMatrix3f("normalMatrix", normalMatrix); // 노말행렬을 버텍스 셰이더 유니폼 변수로 전송
+    shd.setUniform3f("meshSpecCol", glm::vec3(1, 1, 1)); // 스펙큘러 색상을 흰색으로 지정하여 유니폼 변수로 전송
+    shd.setUniformTexture("diffuseTex", diffuseTex, 0); // 디퓨즈 라이팅 계산에 사용할 텍스쳐 유니폼 변수로 전송
+    shd.setUniformTexture("specTex", specTex, 1); // 스펙큘러 라이팅 계산에 사용할 텍스쳐 유니폼 변수로 전송
+    shd.setUniformTexture("nrmTex", nrmTex, 2); // 노말 매핑에 사용할 텍스쳐 유니폼 변수로 전송
+    
+    shd.setUniform3f("ambientCol", glm::vec3(0.1, 0.1, 0.1)); // 배경색과 동일한 앰비언트 라이트 색상값을 유니폼 변수로 전송.
+    shd.setUniform3f("lightDir", getLightDirection(dirLight)); // 조명벡터를 음수화하여 뒤집어주고, 다시 정규화하여 길이를 1로 맞춘 뒤, 유니폼 변수로 전송
+    shd.setUniform3f("lightCol", getLightColor(dirLight)); // 조명색상을 조명강도와 곱해준 뒤, 유니폼 변수로 전송
+    shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
+    
+    shieldMesh.draw(); // shieldMesh 메쉬 드로우콜 호출하여 그려줌.
+    
+    shd.end();
+    // shd(blinnPhong) 사용 중단
+}
+
 //--------------------------------------------------------------
 void ofApp::draw(){
     using namespace glm; // 이제부터 현재 블록 내에서 glm 라이브러리에서 꺼내 쓸 함수 및 객체들은 'glm::' 을 생략해서 사용해도 됨.
@@ -177,6 +215,7 @@ void ofApp::draw(){
     mat4 view = inverse(translate(cam.pos)); // 뷰행렬은 카메라 움직임에 반대방향으로 나머지 대상들을 움직이는 변환행렬이므로, glm::inverse() 내장함수로 역행렬을 구해야 함.
     
     // 이후의 연산은 shield 메쉬 드로우 함수와 water 메쉬 드로우 함수로 쪼개서 추출함.
+    drawShield(dirLight, proj, view);
     drawWater(waterLight, proj, view);
 }
 
